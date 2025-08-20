@@ -1,5 +1,11 @@
 // DOM 加载完成后执行
 document.addEventListener('DOMContentLoaded', function() {
+    // 立即添加页面加载类，防止FOUC
+    document.body.classList.add('page-loading');
+    
+    // 预处理动画元素
+    preloadAnimationElements();
+    
     // 初始化所有功能
     initScrollAnimations();
     initSmoothScroll();
@@ -8,35 +14,16 @@ document.addEventListener('DOMContentLoaded', function() {
     initTypingEffect();
     initParallaxEffect();
     initMobileMenu();
+    
+    // 页面加载完成后移除加载状态
+    window.addEventListener('load', function() {
+        document.body.classList.remove('page-loading');
+        document.body.classList.add('page-loaded');
+    });
 });
 
-// 滚动动画
-function initScrollAnimations() {
-    const observerOptions = {
-        threshold: 0.1,
-        rootMargin: '0px 0px -50px 0px'
-    };
-
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.classList.add('fade-in-up');
-                
-                // 为卡片添加延迟动画效果
-                if (entry.target.classList.contains('feature-card') || 
-                    entry.target.classList.contains('overview-item') ||
-                    entry.target.classList.contains('tech-item') ||
-                    entry.target.classList.contains('highlight-card')) {
-                    
-                    const cards = entry.target.parentElement.children;
-                    const index = Array.from(cards).indexOf(entry.target);
-                    entry.target.style.animationDelay = `${index * 0.1}s`;
-                }
-            }
-        });
-    }, observerOptions);
-
-    // 观察所有需要动画的元素
+// 预处理动画元素
+function preloadAnimationElements() {
     const animatedElements = document.querySelectorAll(`
         .overview-item,
         .feature-card,
@@ -46,7 +33,90 @@ function initScrollAnimations() {
         .category-title
     `);
 
-    animatedElements.forEach(el => observer.observe(el));
+    // 为所有元素添加基础变换和GPU加速
+    animatedElements.forEach((el, index) => {
+        // 添加初始状态
+        el.style.opacity = '0';
+        el.style.transform = 'translate3d(0, 30px, 0)';
+        el.style.transition = 'opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
+        el.style.willChange = 'transform, opacity';
+        
+        // 添加GPU加速类
+        el.classList.add('gpu-accelerated');
+        
+        // 检查是否在视口内（首屏元素）
+        const rect = el.getBoundingClientRect();
+        if (rect.top < window.innerHeight && rect.bottom > 0) {
+            // 首屏元素立即显示，避免闪烁
+            setTimeout(() => {
+                el.style.opacity = '1';
+                el.style.transform = 'translate3d(0, 0, 0)';
+            }, index * 50);
+        }
+    });
+}
+
+// 滚动动画
+function initScrollAnimations() {
+    const animatedElements = document.querySelectorAll(`
+        .overview-item,
+        .feature-card,
+        .tech-item,
+        .highlight-card,
+        .section-title,
+        .category-title
+    `);
+
+    const observerOptions = {
+        threshold: 0.15,
+        rootMargin: '0px 0px -30px 0px'
+    };
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                // 检查元素是否已经被预加载显示了
+                const currentOpacity = parseFloat(window.getComputedStyle(entry.target).opacity);
+                
+                if (currentOpacity < 0.5) { // 只对未显示的元素执行动画
+                    // 为卡片组添加错开延迟效果
+                    if (entry.target.classList.contains('feature-card') || 
+                        entry.target.classList.contains('overview-item') ||
+                        entry.target.classList.contains('tech-item') ||
+                        entry.target.classList.contains('highlight-card')) {
+                        
+                        const cards = entry.target.parentElement.children;
+                        const index = Array.from(cards).indexOf(entry.target);
+                        
+                        // 使用requestAnimationFrame + setTimeout组合
+                        requestAnimationFrame(() => {
+                            setTimeout(() => {
+                                entry.target.style.opacity = '1';
+                                entry.target.style.transform = 'translate3d(0, 0, 0)';
+                            }, index * 100);
+                        });
+                    } else {
+                        // 标题类元素立即显示
+                        requestAnimationFrame(() => {
+                            entry.target.style.opacity = '1';
+                            entry.target.style.transform = 'translate3d(0, 0, 0)';
+                        });
+                    }
+                }
+                
+                // 只触发一次后停止观察
+                observer.unobserve(entry.target);
+            }
+        });
+    }, observerOptions);
+
+    // 只观察尚未显示的元素
+    animatedElements.forEach(el => {
+        const currentOpacity = parseFloat(window.getComputedStyle(el).opacity);
+        if (currentOpacity < 0.5) {
+            observer.observe(el);
+        }
+    });
 }
 
 // 平滑滚动
@@ -77,28 +147,29 @@ function initSmoothScroll() {
 // 导航栏滚动效果
 function initNavbarScroll() {
     const navbar = document.querySelector('.navbar');
-    let lastScrollTop = 0;
+    let ticking = false;
 
-    window.addEventListener('scroll', function() {
+    function updateNavbar() {
         const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
         
+        // 只改变背景透明度，不隐藏导航栏
         if (scrollTop > 100) {
-            navbar.style.background = 'rgba(255, 255, 255, 0.98)';
-            navbar.style.boxShadow = '0 2px 20px rgba(0,0,0,0.1)';
+            navbar.classList.add('navbar-scrolled');
         } else {
-            navbar.style.background = 'rgba(255, 255, 255, 0.95)';
-            navbar.style.boxShadow = 'none';
-        }
-
-        // 导航栏隐藏/显示
-        if (scrollTop > lastScrollTop && scrollTop > 200) {
-            navbar.style.transform = 'translateY(-100%)';
-        } else {
-            navbar.style.transform = 'translateY(0)';
+            navbar.classList.remove('navbar-scrolled');
         }
         
-        lastScrollTop = scrollTop;
-    });
+        ticking = false;
+    }
+
+    function requestTick() {
+        if (!ticking) {
+            requestAnimationFrame(updateNavbar);
+            ticking = true;
+        }
+    }
+
+    window.addEventListener('scroll', requestTick, { passive: true });
 }
 
 // 交互元素效果
@@ -134,16 +205,10 @@ function initInteractiveElements() {
         });
     });
 
-    // 卡片悬停效果增强
+    // 为卡片添加GPU加速类
     const cards = document.querySelectorAll('.feature-card, .overview-item, .tech-item, .highlight-card');
     cards.forEach(card => {
-        card.addEventListener('mouseenter', function() {
-            this.style.transform = 'translateY(-10px) scale(1.02)';
-        });
-        
-        card.addEventListener('mouseleave', function() {
-            this.style.transform = 'translateY(0) scale(1)';
-        });
+        card.classList.add('gpu-accelerated');
     });
 }
 
@@ -169,15 +234,26 @@ function initTypingEffect() {
 // 视差滚动效果
 function initParallaxEffect() {
     const hero = document.querySelector('.hero');
+    const parallax = hero.querySelector('.hero-container');
+    let ticking = false;
     
-    window.addEventListener('scroll', function() {
+    function updateParallax() {
         const scrolled = window.pageYOffset;
-        const parallax = hero.querySelector('.hero-container');
         
-        if (parallax) {
-            parallax.style.transform = `translateY(${scrolled * 0.1}px)`;
+        if (parallax && scrolled < window.innerHeight) {
+            parallax.style.transform = `translate3d(0, ${scrolled * 0.1}px, 0)`;
         }
-    });
+        ticking = false;
+    }
+
+    function requestTick() {
+        if (!ticking) {
+            requestAnimationFrame(updateParallax);
+            ticking = true;
+        }
+    }
+    
+    window.addEventListener('scroll', requestTick, { passive: true });
 }
 
 // 通知功能
@@ -394,9 +470,3 @@ function throttle(func, limit) {
     }
 }
 
-// 优化滚动性能
-const optimizedScrollHandler = throttle(function() {
-    // 滚动相关的性能优化处理
-}, 16); // 约60fps
-
-window.addEventListener('scroll', optimizedScrollHandler);
